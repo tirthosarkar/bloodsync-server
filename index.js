@@ -407,12 +407,12 @@ async function run() {
 
         // 2. If status is being changed to "done" or "canceled"
         // (Only the Requester or an Admin can do this)
-        if (request.requesterId !== userId && role !== 'admin') {
-          return res.status(403).send({
-            success: false,
-            message: 'You are not authorized to update this request.',
-          });
-        }
+        // if (request.requesterId !== userId && role !== "admin") {
+        //   return res.status(403).send({
+        //     success: false,
+        //     message: "You are not authorized to update this request.",
+        //   });
+        // }
 
         // 3. Perform the update for Requester/Admin changing to done/canceled
         const result = await donationRequestsCollection.updateOne(
