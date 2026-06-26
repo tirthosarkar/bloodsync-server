@@ -477,6 +477,24 @@ async function run() {
       }
     });
 
+    // ! GET ALL PENDING DONATION REQUESTS (Public Page)
+
+    app.get('/api/donation-requests', async (req, res) => {
+      try {
+        const requests = await donationRequestsCollection
+          .find({ status: 'pending' })
+          .sort({ createdAt: -1 }) // Newest first
+          .toArray();
+
+        res.status(200).send(requests);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
     // Send a ping to confirm a successful connection
     await client.db('admin').command({ ping: 1 });
     console.log(
