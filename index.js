@@ -430,6 +430,53 @@ async function run() {
       }
     });
 
+    // ! GET ALL DONATION REQUESTS BY USER (With Filter & Pagination)
+
+    app.get('/api/donation-requests/my-requests/:userId', async (req, res) => {
+      try {
+        const { userId } = req.params;
+        const { status, page = 1, limit = 10 } = req.query;
+
+        // 1. Build the MongoDB Query
+        const query = { requesterId: userId };
+        if (status && status !== 'all') {
+          query.status = status;
+        }
+
+        // 2. Calculate Pagination
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+
+        // 3. Get the total count (for pagination metadata)
+        const totalRequests =
+          await donationRequestsCollection.countDocuments(query);
+
+        // 4. Fetch the paginated data
+        const requests = await donationRequestsCollection
+          .find(query)
+          .sort({ createdAt: -1 }) // Newest first
+          .skip(skip)
+          .limit(parseInt(limit))
+          .toArray();
+
+        // 5. Send response with metadata
+        res.status(200).send({
+          success: true,
+          data: requests,
+          pagination: {
+            currentPage: parseInt(page),
+            totalPages: Math.ceil(totalRequests / parseInt(limit)),
+            totalRequests,
+            limit: parseInt(limit),
+          },
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
     // Send a ping to confirm a successful connection
     await client.db('admin').command({ ping: 1 });
     console.log(
