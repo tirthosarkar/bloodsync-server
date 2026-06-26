@@ -139,7 +139,7 @@ async function run() {
     app.post('/api/donation-requests', async (req, res) => {
       try {
         const requestData = req.body;
-        console.log('🩸 Donation Request Received:', requestData); // Debug log
+        console.log('Donation Request Received:', requestData);
 
         // 1. Validate required fields
         const requiredFields = [
@@ -163,7 +163,7 @@ async function run() {
           }
         }
 
-        // 2. Check if the requester is blocked (Server-Side Security)
+        // 2. Check if the requester is blocked
         const user = await usersCollection.findOne({
           authId: requestData.requesterId,
         });
@@ -185,8 +185,8 @@ async function run() {
 
         // 3. Construct the new request document
         const newRequest = {
-          ...requestData,
-          status: 'pending',
+          ...requestData, // ✅ This automatically includes donorName/donorEmail if they are sent
+          status: requestData.status || 'pending', // ✅ Allows 'inprogress' if sent, defaults to 'pending'
           createdAt: new Date(),
           updatedAt: new Date(),
         };
@@ -200,7 +200,29 @@ async function run() {
           message: 'Donation request created successfully',
         });
       } catch (error) {
-        console.error(' Donation Request Error:', error);
+        console.error('🔥 Donation Request Error:', error);
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
+    // ! GET RECENT DONATION REQUESTS BY USER (For Donor Dashboard)
+
+    app.get('/api/donation-requests/recent/:userId', async (req, res) => {
+      try {
+        const { userId } = req.params;
+
+        // Query: Find all requests by this user, limit to 3, sort by newest first
+        const requests = await donationRequestsCollection
+          .find({ requesterId: userId })
+          .sort({ createdAt: -1 }) // Newest first
+          .limit(3) // Max 3 requests
+          .toArray();
+
+        res.status(200).send(requests);
+      } catch (error) {
         res.status(500).send({
           success: false,
           message: error.message,
