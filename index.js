@@ -35,6 +35,8 @@ async function run() {
     const database = client.db(DB);
     const usersCollection = database.collection('users');
 
+    // ! Users
+
     app.post('/api/users', async (req, res) => {
       try {
         console.log('🔥 USER API HIT');
@@ -59,6 +61,29 @@ async function run() {
           insertedId: result.insertedId,
           message: 'User created successfully',
         });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
+    // ! GET USER BY AUTH ID (For Profile Page)
+    app.get('/api/users/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        const user = await usersCollection.findOne({ authId: id });
+
+        if (!user) {
+          return res.status(404).send({
+            success: false,
+            message: 'User not found - authId mismatch',
+          });
+        }
+
+        res.status(200).send(user);
       } catch (error) {
         res.status(500).send({
           success: false,
