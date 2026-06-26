@@ -230,6 +230,109 @@ async function run() {
       }
     });
 
+    // ! 3. UPDATE donation request
+
+    app.patch('/api/donation-requests/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { status, userId, role } = req.body;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({
+            success: false,
+            message: 'Invalid ID format',
+          });
+        }
+
+        const request = await donationRequestsCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!request) {
+          return res.status(404).send({
+            success: false,
+            message: 'Request not found',
+          });
+        }
+
+        // Owner or Admin only
+        if (request.requesterId !== userId && role !== 'admin') {
+          return res.status(403).send({
+            success: false,
+            message: 'You are not authorized to update this request',
+          });
+        }
+
+        const result = await donationRequestsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              status,
+              updatedAt: new Date(),
+            },
+          },
+        );
+
+        res.status(200).send({
+          success: true,
+          message: `Status updated to ${status}`,
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
+    // ! for deleting request
+    app.delete('/api/donation-requests/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { userId, role } = req.body;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({
+            success: false,
+            message: 'Invalid ID format',
+          });
+        }
+
+        const request = await donationRequestsCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!request) {
+          return res.status(404).send({
+            success: false,
+            message: 'Request not found',
+          });
+        }
+
+        // Owner or Admin only
+        if (request.requesterId !== userId && role !== 'admin') {
+          return res.status(403).send({
+            success: false,
+            message: 'You are not authorized to delete this request',
+          });
+        }
+
+        const result = await donationRequestsCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        res.status(200).send({
+          success: true,
+          message: 'Request deleted successfully',
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
     // Send a ping to confirm a successful connection
     await client.db('admin').command({ ping: 1 });
     console.log(
