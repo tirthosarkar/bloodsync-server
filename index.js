@@ -34,6 +34,7 @@ async function run() {
 
     const database = client.db(DB);
     const usersCollection = database.collection('users');
+    const donationRequestsCollection = database.collection('donationRequests');
 
     // ! Users
 
@@ -84,6 +85,49 @@ async function run() {
         }
 
         res.status(200).send(user);
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
+    // ! 3. UPDATE USER BY AUTH ID (For Profile Page Save)
+
+    app.patch('/api/users/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+        const updateData = req.body;
+
+        // Prevent users from changing sensitive fields
+        delete updateData._id;
+        delete updateData.authId;
+        delete updateData.email; // Email cannot be changed
+        delete updateData.role; // Role cannot be changed by user
+        delete updateData.status; // Status cannot be changed by user
+
+        // 👇 Update using authId
+        const result = await usersCollection.updateOne(
+          { authId: id },
+          { $set: updateData },
+        );
+
+        if (result.matchedCount === 0) {
+          return res.status(404).send({
+            success: false,
+            message: 'User not found',
+          });
+        }
+
+        // Fetch the updated user to return to frontend
+        const updatedUser = await usersCollection.findOne({ authId: id });
+
+        res.status(200).send({
+          success: true,
+          message: 'Profile updated successfully',
+          user: updatedUser,
+        });
       } catch (error) {
         res.status(500).send({
           success: false,
