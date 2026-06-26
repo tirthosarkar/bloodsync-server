@@ -93,7 +93,7 @@ async function run() {
       }
     });
 
-    // ! 3. UPDATE USER BY AUTH ID (For Profile Page Save)
+    // ! 3. UPDATE USER BY AUTH ID ( for profile)
 
     app.patch('/api/users/:id', async (req, res) => {
       try {
@@ -107,7 +107,6 @@ async function run() {
         delete updateData.role; // Role cannot be changed by user
         delete updateData.status; // Status cannot be changed by user
 
-        // 👇 Update using authId
         const result = await usersCollection.updateOne(
           { authId: id },
           { $set: updateData },
@@ -120,7 +119,6 @@ async function run() {
           });
         }
 
-        // Fetch the updated user to return to frontend
         const updatedUser = await usersCollection.findOne({ authId: id });
 
         res.status(200).send({
@@ -129,6 +127,80 @@ async function run() {
           user: updatedUser,
         });
       } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
+    // ! 4. CREATE DONATION REQUEST (✅ Fixed placement)
+
+    app.post('/api/donation-requests', async (req, res) => {
+      try {
+        const requestData = req.body;
+        console.log('🩸 Donation Request Received:', requestData); // Debug log
+
+        // 1. Validate required fields
+        const requiredFields = [
+          'requesterId',
+          'recipientName',
+          'recipientDistrict',
+          'recipientUpazila',
+          'hospitalName',
+          'fullAddress',
+          'bloodGroup',
+          'donationDate',
+          'donationTime',
+          'requestMessage',
+        ];
+        for (const field of requiredFields) {
+          if (!requestData[field]) {
+            return res.status(400).send({
+              success: false,
+              message: `${field} is required`,
+            });
+          }
+        }
+
+        // 2. Check if the requester is blocked (Server-Side Security)
+        const user = await usersCollection.findOne({
+          authId: requestData.requesterId,
+        });
+
+        if (!user) {
+          return res.status(404).send({
+            success: false,
+            message: 'Requester user not found',
+          });
+        }
+
+        if (user.status === 'blocked') {
+          return res.status(403).send({
+            success: false,
+            message:
+              'Your account is blocked. You cannot create donation requests.',
+          });
+        }
+
+        // 3. Construct the new request document
+        const newRequest = {
+          ...requestData,
+          status: 'pending',
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+
+        // 4. Insert into MongoDB
+        const result = await donationRequestsCollection.insertOne(newRequest);
+
+        res.status(201).send({
+          success: true,
+          insertedId: result.insertedId,
+          message: 'Donation request created successfully',
+        });
+      } catch (error) {
+        console.error(' Donation Request Error:', error);
         res.status(500).send({
           success: false,
           message: error.message,
