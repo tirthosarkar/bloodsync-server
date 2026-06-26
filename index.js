@@ -264,18 +264,103 @@ async function run() {
       }
     });
 
-    // ! UPDATE donation request
+    // ! UPDATE donation request (Donor donates / Requester marks as Done/Canceled)
+    // app.patch("/api/donation-requests/:id", async (req, res) => {
+    //   try {
+    //     const { id, userId, role } = req.params;
+    //     const { status, donorName, donorEmail } = req.body;
 
+    //     if (!ObjectId.isValid(id)) {
+    //       return res
+    //         .status(400)
+    //         .send({ success: false, message: "Invalid ID format" });
+    //     }
+
+    //     const request = await donationRequestsCollection.findOne({
+    //       _id: new ObjectId(id),
+    //     });
+
+    //     if (!request) {
+    //       return res
+    //         .status(404)
+    //         .send({ success: false, message: "Request not found" });
+    //     }
+
+    //     // ── 🟢 CORE LOGIC FIX ──
+
+    //     // 1. If the status is being changed to "inprogress" (A Donor is volunteering)
+    //     if (status === "inprogress") {
+    //       // ANY logged-in user can donate, EXCEPT the person who created it
+    //       if (request.requesterId === userId) {
+    //         return res.status(403).send({
+    //           success: false,
+    //           message: "You cannot donate to your own request.",
+    //         });
+    //       }
+
+    //       // ✅ Allow the update
+    //       const updateFields = {
+    //         status,
+    //         donorName,
+    //         donorEmail,
+    //         updatedAt: new Date(),
+    //       };
+
+    //       await donationRequestsCollection.updateOne(
+    //         { _id: new ObjectId(id) },
+    //         { $set: updateFields },
+    //       );
+
+    //       return res.status(200).send({
+    //         success: true,
+    //         message:
+    //           "Donation confirmed! You have volunteered to donate blood.",
+    //       });
+    //     }
+
+    //     // 2. If status is being changed to "done" or "canceled"
+    //     // (Only the Requester or an Admin can do this)
+    //     if (request.requesterId !== userId && role !== "admin") {
+    //       return res.status(403).send({
+    //         success: false,
+    //         message: "You are not authorized to update this request.",
+    //       });
+    //     }
+
+    //     // 3. Perform the update for Requester/Admin changing to done/canceled
+    //     const result = await donationRequestsCollection.updateOne(
+    //       { _id: new ObjectId(id) },
+    //       {
+    //         $set: {
+    //           status,
+    //           updatedAt: new Date(),
+    //         },
+    //       },
+    //     );
+
+    //     res.status(200).send({
+    //       success: true,
+    //       message: `Status updated to ${status}`,
+    //     });
+    //   } catch (error) {
+    //     console.error("🔥 PATCH Error:", error);
+    //     res.status(500).send({
+    //       success: false,
+    //       message: error.message,
+    //     });
+    //   }
+    // });
+
+    // UPDATED BACKEND CODE
     app.patch('/api/donation-requests/:id', async (req, res) => {
       try {
-        const { id } = req.params;
-        const { status, userId, role } = req.body;
+        const { id } = req.params; // <--- ✅ Take ID from URL
+        const { status, donorName, donorEmail, userId, role } = req.body; // <--- ✅ Take userId and role from BODY
 
         if (!ObjectId.isValid(id)) {
-          return res.status(400).send({
-            success: false,
-            message: 'Invalid ID format',
-          });
+          return res
+            .status(400)
+            .send({ success: false, message: 'Invalid ID format' });
         }
 
         const request = await donationRequestsCollection.findOne({
@@ -283,20 +368,53 @@ async function run() {
         });
 
         if (!request) {
-          return res.status(404).send({
-            success: false,
-            message: 'Request not found',
+          return res
+            .status(404)
+            .send({ success: false, message: 'Request not found' });
+        }
+
+        // ── 🟢 CORE LOGIC FIX ──
+
+        // 1. If the status is being changed to "inprogress" (A Donor is volunteering)
+        if (status === 'inprogress') {
+          // ANY logged-in user can donate, EXCEPT the person who created it
+          if (request.requesterId === userId) {
+            return res.status(403).send({
+              success: false,
+              message: 'You cannot donate to your own request.',
+            });
+          }
+
+          // ✅ Allow the update
+          const updateFields = {
+            status,
+            donorName,
+            donorEmail,
+            updatedAt: new Date(),
+          };
+
+          await donationRequestsCollection.updateOne(
+            { _id: new ObjectId(id) },
+            { $set: updateFields },
+          );
+
+          return res.status(200).send({
+            success: true,
+            message:
+              'Donation confirmed! You have volunteered to donate blood.',
           });
         }
 
-        // Owner or Admin only
+        // 2. If status is being changed to "done" or "canceled"
+        // (Only the Requester or an Admin can do this)
         if (request.requesterId !== userId && role !== 'admin') {
           return res.status(403).send({
             success: false,
-            message: 'You are not authorized to update this request',
+            message: 'You are not authorized to update this request.',
           });
         }
 
+        // 3. Perform the update for Requester/Admin changing to done/canceled
         const result = await donationRequestsCollection.updateOne(
           { _id: new ObjectId(id) },
           {
@@ -312,6 +430,7 @@ async function run() {
           message: `Status updated to ${status}`,
         });
       } catch (error) {
+        console.error('🔥 PATCH Error:', error);
         res.status(500).send({
           success: false,
           message: error.message,
@@ -488,6 +607,45 @@ async function run() {
 
         res.status(200).send(requests);
       } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
+    // ! GET SINGLE DONATION REQUEST BY ID (For Details Page)
+
+    app.get('/api/donation-requests/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        let objectId;
+        try {
+          // ✅ Wrap the ObjectId creation in a try/catch block
+          objectId = new ObjectId(id);
+        } catch (err) {
+          // If the ID string is invalid for MongoDB, return 404 (Not Found)
+          return res.status(404).send({
+            success: false,
+            message: 'Request not found',
+          });
+        }
+
+        const request = await donationRequestsCollection.findOne({
+          _id: objectId,
+        });
+
+        if (!request) {
+          return res.status(404).send({
+            success: false,
+            message: 'Request not found',
+          });
+        }
+
+        res.status(200).send(request);
+      } catch (error) {
+        console.error('Error fetching request:', error);
         res.status(500).send({
           success: false,
           message: error.message,
