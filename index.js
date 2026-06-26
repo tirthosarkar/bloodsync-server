@@ -653,6 +653,51 @@ async function run() {
       }
     });
 
+    // ! GET DONORS BY SEARCH (Public Search Page)
+    app.get('/api/donors/search', async (req, res) => {
+      try {
+        const { bloodGroup, district, upazila } = req.query;
+
+        // 1. Build dynamic filter query
+        const filter = {};
+
+        if (bloodGroup && bloodGroup !== 'all') {
+          filter.bloodGroup = bloodGroup;
+        }
+
+        // ⚠️ CHANGE: Search by ID instead of Name (Your users store "district": "47")
+        if (district && district !== 'all') {
+          filter.district = district;
+        }
+
+        // ⚠️ CHANGE: Search by ID instead of Name
+        if (upazila && upazila !== 'all') {
+          filter.upazila = upazila;
+        }
+
+        // 2. Only show active donors (not blocked)
+        filter.status = { $ne: 'blocked' };
+
+        console.log('🔍 Search Query:', filter);
+
+        // 3. Query MongoDB
+        const donors = await usersCollection.find(filter).limit(50).toArray();
+
+        // 4. Return the list
+        res.status(200).send({
+          success: true,
+          count: donors.length,
+          data: donors,
+        });
+      } catch (error) {
+        console.error('🔥 Donor Search Error:', error);
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
     // Send a ping to confirm a successful connection
     await client.db('admin').command({ ping: 1 });
     console.log(
