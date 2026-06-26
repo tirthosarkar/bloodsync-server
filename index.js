@@ -230,7 +230,41 @@ async function run() {
       }
     });
 
-    // ! 3. UPDATE donation request
+    // ! GET SINGLE DONATION REQUEST BY ID (For Edit Page)
+    app.get('/api/donation-requests/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+
+        // Validate ID
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({
+            success: false,
+            message: 'Invalid ID format',
+          });
+        }
+
+        const request = await donationRequestsCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!request) {
+          return res.status(404).send({
+            success: false,
+            message: 'Request not found',
+          });
+        }
+
+        res.status(200).send(request);
+      } catch (error) {
+        console.error('Error fetching request:', error);
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
+    // ! UPDATE donation request
 
     app.patch('/api/donation-requests/:id', async (req, res) => {
       try {
@@ -326,6 +360,69 @@ async function run() {
           message: 'Request deleted successfully',
         });
       } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
+    // ! EDIT (Update full details) donation request
+    app.put('/api/donation-requests/edit/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { userId, role, ...updateData } = req.body;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({
+            success: false,
+            message: 'Invalid ID format',
+          });
+        }
+
+        const request = await donationRequestsCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!request) {
+          return res.status(404).send({
+            success: false,
+            message: 'Request not found',
+          });
+        }
+
+        // Owner or Admin only
+        if (request.requesterId !== userId && role !== 'admin') {
+          return res.status(403).send({
+            success: false,
+            message: 'You are not authorized to edit this request',
+          });
+        }
+
+        // Prevent editing if already done or canceled
+        if (request.status === 'done' || request.status === 'canceled') {
+          return res.status(400).send({
+            success: false,
+            message: `Cannot edit a request that is already ${request.status}`,
+          });
+        }
+
+        const result = await donationRequestsCollection.updateOne(
+          { _id: new ObjectId(id) },
+          {
+            $set: {
+              ...updateData,
+              updatedAt: new Date(),
+            },
+          },
+        );
+
+        res.status(200).send({
+          success: true,
+          message: 'Request updated successfully',
+        });
+      } catch (error) {
+        console.error('Edit request error:', error);
         res.status(500).send({
           success: false,
           message: error.message,
