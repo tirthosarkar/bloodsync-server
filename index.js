@@ -34,6 +34,8 @@ async function run() {
 
     const database = client.db(DB);
     const usersCollection = database.collection('users');
+    const userCollection = database.collection('user');
+
     const donationRequestsCollection = database.collection('donationRequests');
 
     // ! Users
@@ -691,6 +693,137 @@ async function run() {
         });
       } catch (error) {
         console.error('🔥 Donor Search Error:', error);
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
+    // ! GET ALL USERS (Admin Only) with Pagination & Filter
+
+    app.get('/api/admin/users', async (req, res) => {
+      try {
+        const { status, page = 1, limit = 10 } = req.query;
+
+        // 1. Build the MongoDB Query
+        const query = {};
+        if (status && status !== 'all') {
+          query.status = status;
+        }
+
+        // 2. Calculate Pagination
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+
+        // 3. Get total count
+        const totalUsers = await usersCollection.countDocuments(query);
+
+        // 4. Fetch paginated users (exclude sensitive fields like password if present)
+        const users = await usersCollection
+          .find(query)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(parseInt(limit))
+          .toArray();
+
+        res.status(200).send({
+          success: true,
+          data: users,
+          pagination: {
+            currentPage: parseInt(page),
+            totalPages: Math.ceil(totalUsers / parseInt(limit)),
+            totalUsers,
+            limit: parseInt(limit),
+          },
+        });
+      } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+    // ! UPDATE USER STATUS / ROLE (Admin Only) - CLEAN & RELIABLE VERSION
+    // Import Better Auth at the top of your server.js (if not already imported)
+    // const { auth } = require("../path/to/your/auth-config"); // Adjust path as needed
+
+    // ! UPDATE USER STATUS / ROLE (Admin Only) - Using Better Auth API
+    app.patch('/api/admin/users/:id', async (req, res) => {
+      try {
+        const { id } = req.params; // authId
+        const { action } = req.body;
+
+        console.log('🚀 Admin Action Received:', { authId: id, action });
+
+        if (!action) {
+          return res
+            .status(400)
+            .send({ success: false, message: 'Action is required' });
+        }
+
+        // 1. Determine the update based on the action
+        let updateFields = {};
+
+        if (action === 'block') {
+          updateFields = { status: 'blocked' };
+        } else if (action === 'unblock') {
+          updateFields = { status: 'active' };
+        } else if (action === 'makeVolunteer') {
+          updateFields = { role: 'volunteer' };
+        } else if (action === 'makeAdmin') {
+          updateFields = { role: 'admin' };
+        } else {
+          return res
+            .status(400)
+            .send({ success: false, message: 'Invalid action provided' });
+        }
+
+        // 2. Update the 'users' collection (Your custom app data)
+        const usersUpdateResult = await usersCollection.updateOne(
+          { authId: id },
+          {
+            $set: updateFields,
+            $unset: { action: '' },
+          },
+        );
+
+        if (usersUpdateResult.matchedCount === 0) {
+          return res.status(404).send({
+            success: false,
+            message: "User not found in 'users' collection",
+          });
+        }
+        console.log("✅ 'users' collection updated.");
+
+        // 3. Update the 'user' collection using Better Auth API (Correct Way!)
+        // 3. Update Better Auth 'user' collection directly by email
+        const appUser = await usersCollection.findOne({ authId: id });
+        if (appUser) {
+          await userCollection.updateOne(
+            { email: appUser.email },
+            { $set: updateFields },
+          );
+          console.log("✅ 'user' (Better Auth) collection updated.");
+        } else {
+          console.warn("⚠️ User not found in Better Auth 'user' collection.");
+        }
+
+        // 4. Send success response
+        const successMessage =
+          action === 'block'
+            ? 'blocked'
+            : action === 'unblock'
+              ? 'unblocked'
+              : action === 'makeVolunteer'
+                ? 'made a volunteer'
+                : 'made an admin';
+
+        res.status(200).send({
+          success: true,
+          message: `User ${successMessage} successfully!`,
+        });
+      } catch (error) {
+        console.error('🔥 Admin PATCH Error:', error);
         res.status(500).send({
           success: false,
           message: error.message,
