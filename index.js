@@ -1,7 +1,8 @@
 const express = require('express');
 const dotenv = require('dotenv');
-const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 dotenv.config();
+const stripe = require('stripe')(process.env.STRIPE_SECRET_KEY);
+const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 
 const uri = process.env.MONGO_DB_URI;
 
@@ -35,6 +36,8 @@ async function run() {
     const database = client.db(DB);
     const usersCollection = database.collection('users');
     const userCollection = database.collection('user');
+
+    const fundingCollection = database.collection('funding');
 
     const donationRequestsCollection = database.collection('donationRequests');
 
@@ -923,6 +926,109 @@ async function run() {
           success: false,
           message: error.message,
         });
+      }
+    });
+
+    // ! ==========================================
+    // ! 🟢 FUNDING & STRIPE ROUTES
+    // ! ==========================================
+
+    // 1. GET TOTAL FUNDS (For Admin Dashboard Stats)
+    app.get('/api/funding/total', async (req, res) => {
+      try {
+        const result = await fundingCollection
+          .aggregate([
+            { $group: { _id: null, totalAmount: { $sum: '$amount' } } },
+          ])
+          .toArray();
+
+        const total = result.length > 0 ? result[0].totalAmount : 0;
+        res.status(200).send({ success: true, totalAmount: total });
+      } catch (error) {
+        res.status(500).send({ success: false, message: error.message });
+      }
+    });
+
+    // 2. GET ALL FUNDING (For the Table)
+    app.get('/api/funding', async (req, res) => {
+      try {
+        const fundingData = await fundingCollection
+          .aggregate([
+            {
+              $lookup: {
+                from: 'users',
+                localField: 'userId',
+                foreignField: 'authId',
+                as: 'donorInfo',
+              },
+            },
+            {
+              $unwind: { path: '$donorInfo', preserveNullAndEmptyArrays: true },
+            },
+            {
+              $project: {
+                donorName: '$donorInfo.name',
+                donorEmail: '$donorInfo.email',
+                amount: 1,
+                createdAt: 1,
+                paymentId: 1,
+              },
+            },
+            { $sort: { createdAt: -1 } },
+          ])
+          .toArray();
+
+        res.status(200).send({ success: true, data: fundingData });
+      } catch (error) {
+        res.status(500).send({ success: false, message: error.message });
+      }
+    });
+
+    // 3. CREATE STRIPE PAYMENT INTENT
+    app.post('/api/funding/create-payment-intent', async (req, res) => {
+      try {
+        const { amount } = req.body; // Amount is in cents
+
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: parseInt(amount),
+          currency: 'usd',
+          automatic_payment_methods: { enabled: true },
+        });
+
+        res.send({ clientSecret: paymentIntent.client_secret });
+      } catch (error) {
+        console.error('🔥 Stripe Error:', error);
+        res.status(500).send({ error: error.message });
+      }
+    });
+
+    // 4. SAVE FUNDING TO DATABASE
+    app.post('/api/funding', async (req, res) => {
+      try {
+        const { userId, amount, paymentId } = req.body;
+
+        if (!userId || !amount || !paymentId) {
+          return res
+            .status(400)
+            .send({ success: false, message: 'Missing required fields' });
+        }
+
+        const newFunding = {
+          userId: userId,
+          amount: parseFloat(amount),
+          paymentId: paymentId,
+          createdAt: new Date(),
+        };
+
+        await fundingCollection.insertOne(newFunding);
+
+        res.status(201).send({
+          success: true,
+          message: 'Funding saved successfully!',
+        });
+      } catch (error) {
+        console.error('🔥 Funding Save Error:', error);
+        res.status(500).send({ success: false, message: error.message });
       }
     });
 
