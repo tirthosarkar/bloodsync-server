@@ -136,6 +136,52 @@ async function run() {
       }
     });
 
+    // ! GET ALL DONATION REQUESTS (Admin & Volunteer View) WITH PAGINATION
+    app.get('/api/donation-requests/all', async (req, res) => {
+      try {
+        const { status, page = 1, limit = 10 } = req.query;
+
+        // 1. Build Query - Get ALL requests, optionally filter by status
+        const query = {};
+        if (status && status !== 'all') {
+          query.status = status;
+        }
+
+        // 2. Calculate Pagination
+        const skip = (parseInt(page) - 1) * parseInt(limit);
+
+        // 3. Get total count
+        const totalRequests =
+          await donationRequestsCollection.countDocuments(query);
+
+        // 4. Fetch paginated data (Sorted by newest first)
+        const requests = await donationRequestsCollection
+          .find(query)
+          .sort({ createdAt: -1 })
+          .skip(skip)
+          .limit(parseInt(limit))
+          .toArray();
+
+        // 5. Send response with metadata
+        res.status(200).send({
+          success: true,
+          data: requests,
+          pagination: {
+            currentPage: parseInt(page),
+            totalPages: Math.ceil(totalRequests / parseInt(limit)),
+            totalRequests,
+            limit: parseInt(limit),
+          },
+        });
+      } catch (error) {
+        console.error('🔥 Error fetching all donation requests:', error);
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
     // ! 4. CREATE DONATION REQUEST (✅ Fixed placement)
 
     app.post('/api/donation-requests', async (req, res) => {
@@ -481,6 +527,55 @@ async function run() {
           message: 'Request deleted successfully',
         });
       } catch (error) {
+        res.status(500).send({
+          success: false,
+          message: error.message,
+        });
+      }
+    });
+
+    // ! DELETE REQUEST (ADMIN ONLY) - No userId required
+    app.delete('/api/donation-requests/admin-delete/:id', async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { role } = req.body; // Only receives role from frontend
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({
+            success: false,
+            message: 'Invalid ID format',
+          });
+        }
+
+        // Ensure the person deleting is an admin
+        if (role !== 'admin') {
+          return res.status(403).send({
+            success: false,
+            message: 'You are not authorized to delete this request',
+          });
+        }
+
+        const request = await donationRequestsCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!request) {
+          return res.status(404).send({
+            success: false,
+            message: 'Request not found',
+          });
+        }
+
+        const result = await donationRequestsCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
+
+        res.status(200).send({
+          success: true,
+          message: 'Request deleted successfully',
+        });
+      } catch (error) {
+        console.error('🔥 Admin Delete Error:', error);
         res.status(500).send({
           success: false,
           message: error.message,
