@@ -36,10 +36,236 @@ async function run() {
     const database = client.db(DB);
     const usersCollection = database.collection('users');
     const userCollection = database.collection('user');
+    const sessionCollection = database.collection('session');
 
     const fundingCollection = database.collection('funding');
 
     const donationRequestsCollection = database.collection('donationRequests');
+
+    //! verify token
+
+    const verifyToken = async (req, res, next) => {
+      console.log('headers', req.headers);
+
+      const authHeader = req.headers?.authorization;
+      if (!authHeader) {
+        return res.status(401).json({
+          message: 'Authentication required. Please log in.',
+          code: 'NO_TOKEN',
+        });
+      }
+
+      const token = authHeader.split(' ')[1];
+      if (!token) {
+        return res.status(401).json({
+          message: 'Invalid authorization format. Use Bearer token.',
+          code: 'INVALID_FORMAT',
+        });
+      }
+
+      const query = { token: token };
+      const session = await sessionCollection.findOne(query);
+
+      if (!session) {
+        return res.status(401).send({ message: 'Invalid or expired session' }); // Add this edge case
+      }
+
+      const userId = session.userId;
+
+      const userQuery = {
+        _id: userId,
+      };
+
+      const user = await userCollection.findOne(userQuery);
+      console.log('user of the session', user);
+
+      if (!user) {
+        return res.status(401).send({ message: 'User not found' }); // Add this edge case
+      }
+
+      // set data in the req object
+
+      req.user = user;
+
+      next();
+    };
+
+    //! verify the role
+
+    const verifyAdmin = async (req, res, next) => {
+      if (!req.user) {
+        return res.status(401).json({
+          message: 'Authentication required before authorization check.',
+          code: 'NO_USER',
+        });
+      }
+
+      if (req.user.role !== 'admin') {
+        return res.status(403).json({
+          message:
+            'Admin access required. Your current role does not have permission.',
+          code: 'NOT_ADMIN',
+          userRole: req.user.role, // Helpful for debugging
+        });
+      }
+      next();
+    };
+
+    // ! Verify Admin OR Volunteer Role
+    const verifyVolunteerOrAdmin = async (req, res, next) => {
+      if (!req.user) {
+        return res.status(401).json({
+          message: 'Authentication required before authorization check.',
+          code: 'NO_USER',
+        });
+      }
+
+      if (req.user.role !== 'admin' && req.user.role !== 'volunteer') {
+        return res.status(403).json({
+          message: 'Admin or Volunteer access required.',
+          code: 'NOT_ALLOWED',
+          userRole: req.user.role,
+        });
+      }
+      next();
+    };
+
+    // 1. GET TOTAL DONOR COUNT
+    //    Client calls: serverFetch("/api/users/count")
+    //    Returns:      { success, count }
+    // ─────────────────────────────────────────────
+    app.get('/api/users/count', async (req, res) => {
+      try {
+        // ✅ usersCollection  (your app's "users" — NOT BetterAuth "user")
+        const count = await usersCollection.countDocuments({ role: 'donor' });
+        res.status(200).send({ success: true, count });
+      } catch (error) {
+        res.status(500).send({ success: false, message: error.message });
+      }
+    });
+    // 1. GET TOTAL FUNDS (For Admin Dashboard Stats)
+    app.get('/api/funding/total', verifyToken, async (req, res) => {
+      try {
+        const result = await fundingCollection
+          .aggregate([
+            { $group: { _id: null, totalAmount: { $sum: '$amount' } } },
+          ])
+          .toArray();
+
+        const total = result.length > 0 ? result[0].totalAmount : 0;
+        res.status(200).send({ success: true, totalAmount: total });
+      } catch (error) {
+        res.status(500).send({ success: false, message: error.message });
+      }
+    });
+    // 3. GET TOTAL DONATION REQUEST COUNT
+    //    Client calls: serverFetch("/api/donation-requests/count")
+    //    Returns:      { success, count }
+    // ─────────────────────────────────────────────
+    app.get('/api/donation-requests/count', async (req, res) => {
+      try {
+        const count = await donationRequestsCollection.countDocuments();
+        res.status(200).send({ success: true, count });
+      } catch (error) {
+        res.status(500).send({ success: false, message: error.message });
+      }
+    });
+    // 4. GET STATUS BREAKDOWN  ← Pie Chart data
+    //    Client calls: serverFetch("/api/donation-requests/status-breakdown")
+    //    Returns:      { success, data: [{ name, value }] }
+    //    Example:      [{ name: "Pending", value: 12 }, { name: "Done", value: 5 }]
+    // ─────────────────────────────────────────────
+    // ! GET STATUS BREAKDOWN (For Pie Chart) - 100% Correct Grouping
+    app.get('/api/donation-requests/status-breakdown', async (req, res) => {
+      try {
+        const results = await donationRequestsCollection
+          .aggregate([
+            {
+              $addFields: {
+                // 🟢 Step 1: Standardize "cancelled" to "canceled" BEFORE grouping
+                unifiedStatus: {
+                  $cond: {
+                    if: {
+                      $in: [
+                        '$status',
+                        ['canceled', 'cancelled', 'Canceled', 'Cancelled'],
+                      ],
+                    },
+                    then: 'canceled', // ✅ Force all cancels to be lowercase "canceled"
+                    else: '$status',
+                  },
+                },
+              },
+            },
+            {
+              $group: {
+                _id: '$unifiedStatus', // 🟢 Step 2: Group by the UNIFIED status
+                value: { $sum: 1 },
+              },
+            },
+          ])
+          .toArray();
+
+        // 🟢 Step 3: Capitalize the first letter for the Frontend
+        const data = results.map(item => ({
+          name: item._id.charAt(0).toUpperCase() + item._id.slice(1),
+          value: item.value,
+        }));
+
+        res.status(200).send({ success: true, data });
+      } catch (error) {
+        console.error('🔥 Status Breakdown Error:', error);
+        res.status(500).send({ success: false, message: error.message });
+      }
+    });
+
+    // ─────────────────────────────────────────────
+    // 5. GET WEEKLY STATS  ← Bar Chart data
+    //    Client calls: serverFetch("/api/donation-requests/weekly-stats")
+    //    Returns:      { success, data: [{ day, count }] }
+    //    Example:      [{ day: "Mon", count: 3 }, { day: "Tue", count: 7 }]
+    // ─────────────────────────────────────────────
+    app.get('/api/donation-requests/weekly-stats', async (req, res) => {
+      try {
+        // Last 7 days window
+        const sevenDaysAgo = new Date();
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+        sevenDaysAgo.setHours(0, 0, 0, 0); // start of that day
+
+        const results = await donationRequestsCollection
+          .aggregate([
+            {
+              // Only documents created in the last 7 days
+              $match: {
+                createdAt: { $gte: sevenDaysAgo },
+              },
+            },
+            {
+              // Group by day-of-week number (1 = Sun … 7 = Sat in MongoDB)
+              $group: {
+                _id: { $dayOfWeek: '$createdAt' },
+                count: { $sum: 1 },
+              },
+            },
+            {
+              $sort: { _id: 1 }, // Sun → Sat order
+            },
+          ])
+          .toArray();
+
+        // MongoDB $dayOfWeek:  1=Sun 2=Mon 3=Tue 4=Wed 5=Thu 6=Fri 7=Sat
+        const dayMap = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+        const data = results.map(item => ({
+          day: dayMap[item._id - 1], // convert 1-indexed to label
+          count: item.count,
+        }));
+
+        res.status(200).send({ success: true, data });
+      } catch (error) {
+        res.status(500).send({ success: false, message: error.message });
+      }
+    });
 
     // ! Users
 
@@ -538,53 +764,58 @@ async function run() {
     });
 
     // ! DELETE REQUEST (ADMIN ONLY) - No userId required
-    app.delete('/api/donation-requests/admin-delete/:id', async (req, res) => {
-      try {
-        const { id } = req.params;
-        const { role } = req.body; // Only receives role from frontend
+    app.delete(
+      '/api/donation-requests/admin-delete/:id',
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const { id } = req.params;
+          const { role } = req.body; // Only receives role from frontend
 
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({
+          if (!ObjectId.isValid(id)) {
+            return res.status(400).send({
+              success: false,
+              message: 'Invalid ID format',
+            });
+          }
+
+          // Ensure the person deleting is an admin
+          if (role !== 'admin') {
+            return res.status(403).send({
+              success: false,
+              message: 'You are not authorized to delete this request',
+            });
+          }
+
+          const request = await donationRequestsCollection.findOne({
+            _id: new ObjectId(id),
+          });
+
+          if (!request) {
+            return res.status(404).send({
+              success: false,
+              message: 'Request not found',
+            });
+          }
+
+          const result = await donationRequestsCollection.deleteOne({
+            _id: new ObjectId(id),
+          });
+
+          res.status(200).send({
+            success: true,
+            message: 'Request deleted successfully',
+          });
+        } catch (error) {
+          console.error('🔥 Admin Delete Error:', error);
+          res.status(500).send({
             success: false,
-            message: 'Invalid ID format',
+            message: error.message,
           });
         }
-
-        // Ensure the person deleting is an admin
-        if (role !== 'admin') {
-          return res.status(403).send({
-            success: false,
-            message: 'You are not authorized to delete this request',
-          });
-        }
-
-        const request = await donationRequestsCollection.findOne({
-          _id: new ObjectId(id),
-        });
-
-        if (!request) {
-          return res.status(404).send({
-            success: false,
-            message: 'Request not found',
-          });
-        }
-
-        const result = await donationRequestsCollection.deleteOne({
-          _id: new ObjectId(id),
-        });
-
-        res.status(200).send({
-          success: true,
-          message: 'Request deleted successfully',
-        });
-      } catch (error) {
-        console.error('🔥 Admin Delete Error:', error);
-        res.status(500).send({
-          success: false,
-          message: error.message,
-        });
-      }
-    });
+      },
+    );
 
     // ! EDIT (Update full details) donation request
     app.put('/api/donation-requests/edit/:id', async (req, res) => {
@@ -932,22 +1163,6 @@ async function run() {
     // ! ==========================================
     // ! 🟢 FUNDING & STRIPE ROUTES
     // ! ==========================================
-
-    // 1. GET TOTAL FUNDS (For Admin Dashboard Stats)
-    app.get('/api/funding/total', async (req, res) => {
-      try {
-        const result = await fundingCollection
-          .aggregate([
-            { $group: { _id: null, totalAmount: { $sum: '$amount' } } },
-          ])
-          .toArray();
-
-        const total = result.length > 0 ? result[0].totalAmount : 0;
-        res.status(200).send({ success: true, totalAmount: total });
-      } catch (error) {
-        res.status(500).send({ success: false, message: error.message });
-      }
-    });
 
     // 2. GET ALL FUNDING (For the Table)
     app.get('/api/funding', async (req, res) => {
