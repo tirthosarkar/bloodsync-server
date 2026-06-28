@@ -346,30 +346,52 @@ async function run() {
       }
     });
 
-    // ! 3. UPDATE USER BY AUTH ID ( for profile)
+    // ! 3. UPDATE USER BY AUTH ID ( for profile) conflict between user vs users
 
     app.patch('/api/users/:id', async (req, res) => {
       try {
         const { id } = req.params;
         const updateData = req.body;
 
-        // Prevent users from changing sensitive fields
+        // Prevent sensitive field changes
         delete updateData._id;
         delete updateData.authId;
-        delete updateData.email; // Email cannot be changed
-        delete updateData.role; // Role cannot be changed by user
-        delete updateData.status; // Status cannot be changed by user
+        delete updateData.email;
+        delete updateData.role;
+        delete updateData.status;
 
+        // ── 1. users collection থেকে email বের করো ──
+        const existingUser = await usersCollection.findOne({ authId: id });
+
+        if (!existingUser) {
+          return res
+            .status(404)
+            .send({ success: false, message: 'User not found' });
+        }
+
+        // ── 2. users collection update ──
         const result = await usersCollection.updateOne(
           { authId: id },
           { $set: updateData },
         );
 
         if (result.matchedCount === 0) {
-          return res.status(404).send({
-            success: false,
-            message: 'User not found',
-          });
+          return res
+            .status(404)
+            .send({ success: false, message: 'User not found' });
+        }
+
+        // ── 3. BetterAuth user collection sync (email দিয়ে) ──
+        const authSyncData = {};
+        if (updateData.name) authSyncData.name = updateData.name;
+        if (updateData.image) authSyncData.image = updateData.image;
+
+        if (Object.keys(authSyncData).length > 0) {
+          authSyncData.updatedAt = new Date();
+          await userCollection.updateOne(
+            { email: existingUser.email },
+            { $set: authSyncData },
+          );
         }
 
         const updatedUser = await usersCollection.findOne({ authId: id });
@@ -380,10 +402,7 @@ async function run() {
           user: updatedUser,
         });
       } catch (error) {
-        res.status(500).send({
-          success: false,
-          message: error.message,
-        });
+        res.status(500).send({ success: false, message: error.message });
       }
     });
 
