@@ -300,6 +300,28 @@ async function run() {
         });
       }
     });
+    // ! GET HOMEPAGE STATS
+    app.get('/api/stats', async (req, res) => {
+      try {
+        const totalDonors = await usersCollection.countDocuments({
+          role: 'donor',
+        });
+        const totalRequests = await donationRequestsCollection.countDocuments();
+        const totalFundingResult = await fundingCollection
+          .aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }])
+          .toArray();
+        const totalFunding = totalFundingResult[0]?.total || 0;
+
+        res.status(200).send({
+          success: true,
+          totalDonors,
+          totalRequests,
+          totalFunding,
+        });
+      } catch (error) {
+        res.status(500).send({ success: false, message: error.message });
+      }
+    });
 
     // ! GET USER BY AUTH ID (For Profile Page)
     app.get('/api/users/:id', async (req, res) => {
