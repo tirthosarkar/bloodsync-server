@@ -695,6 +695,14 @@ async function run() {
 
         // 1. If the status is being changed to "inprogress" (A Donor is volunteering)
         if (status === 'inprogress') {
+          // const donor = await usersCollection.findOne({ authId: userId });
+          // if (donor?.status === "blocked") {
+          //   return res.status(403).send({
+          //     success: false,
+          //     message: "Your account is blocked. You cannot donate.",
+          //   });
+          // }
+
           // ANY logged-in user can donate, EXCEPT the person who created it
           if (request.requesterId === userId) {
             return res.status(403).send({
