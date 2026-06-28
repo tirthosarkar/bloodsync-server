@@ -277,7 +277,7 @@ Before going live, ensure:
 
 **Tirtho Sarkar**
 
-[![GitHub](https://img.shields.io/badge/GitHub-tirthosarkar-181717?style=flat-square&logo=github)](https://www.linkedin.com/in/tirtho-sarkar/)
+[![GitHub](https://img.shields.io/badge/GitHub-tirthosarkar-181717?style=flat-square&logo=github)](https://github.com/tirthosarkar)
 
 </div>
 
