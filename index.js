@@ -31,7 +31,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
 
     const database = client.db(DB);
     const usersCollection = database.collection('users');
@@ -818,67 +818,71 @@ async function run() {
     );
 
     // ! EDIT (Update full details) donation request
-    app.put('/api/donation-requests/edit/:id', async (req, res) => {
-      try {
-        const { id } = req.params;
-        const { userId, role, ...updateData } = req.body;
+    app.put(
+      '/api/donation-requests/edit/:id',
+      verifyToken,
+      async (req, res) => {
+        try {
+          const { id } = req.params;
+          const { userId, role, ...updateData } = req.body;
 
-        if (!ObjectId.isValid(id)) {
-          return res.status(400).send({
-            success: false,
-            message: 'Invalid ID format',
+          if (!ObjectId.isValid(id)) {
+            return res.status(400).send({
+              success: false,
+              message: 'Invalid ID format',
+            });
+          }
+
+          const request = await donationRequestsCollection.findOne({
+            _id: new ObjectId(id),
           });
-        }
 
-        const request = await donationRequestsCollection.findOne({
-          _id: new ObjectId(id),
-        });
+          if (!request) {
+            return res.status(404).send({
+              success: false,
+              message: 'Request not found',
+            });
+          }
 
-        if (!request) {
-          return res.status(404).send({
-            success: false,
-            message: 'Request not found',
-          });
-        }
+          // Owner or Admin only
+          if (request.requesterId !== userId && role !== 'admin') {
+            return res.status(403).send({
+              success: false,
+              message: 'You are not authorized to edit this request',
+            });
+          }
 
-        // Owner or Admin only
-        if (request.requesterId !== userId && role !== 'admin') {
-          return res.status(403).send({
-            success: false,
-            message: 'You are not authorized to edit this request',
-          });
-        }
+          // Prevent editing if already done or canceled
+          if (request.status === 'done' || request.status === 'canceled') {
+            return res.status(400).send({
+              success: false,
+              message: `Cannot edit a request that is already ${request.status}`,
+            });
+          }
 
-        // Prevent editing if already done or canceled
-        if (request.status === 'done' || request.status === 'canceled') {
-          return res.status(400).send({
-            success: false,
-            message: `Cannot edit a request that is already ${request.status}`,
-          });
-        }
-
-        const result = await donationRequestsCollection.updateOne(
-          { _id: new ObjectId(id) },
-          {
-            $set: {
-              ...updateData,
-              updatedAt: new Date(),
+          const result = await donationRequestsCollection.updateOne(
+            { _id: new ObjectId(id) },
+            {
+              $set: {
+                ...updateData,
+                updatedAt: new Date(),
+              },
             },
-          },
-        );
+          );
 
-        res.status(200).send({
-          success: true,
-          message: 'Request updated successfully',
-        });
-      } catch (error) {
-        console.error('Edit request error:', error);
-        res.status(500).send({
-          success: false,
-          message: error.message,
-        });
-      }
-    });
+          res.status(200).send({
+            success: true,
+            message: 'Request updated successfully',
+          });
+        } catch (error) {
+          console.error('Edit request error:', error);
+          res.status(500).send({
+            success: false,
+            message: error.message,
+          });
+        }
+      },
+    );
 
     // ! GET ALL DONATION REQUESTS BY USER (With Filter & Pagination)
 
@@ -947,42 +951,47 @@ async function run() {
 
     // ! GET SINGLE DONATION REQUEST BY ID (For Details Page)
 
-    app.get('/api/donation-requests/:id', async (req, res) => {
-      try {
-        const { id } = req.params;
+    app.get(
+      '/api/donation-requests/:id',
+      verifyToken,
 
-        let objectId;
+      async (req, res) => {
         try {
-          // ✅ Wrap the ObjectId creation in a try/catch block
-          objectId = new ObjectId(id);
-        } catch (err) {
-          // If the ID string is invalid for MongoDB, return 404 (Not Found)
-          return res.status(404).send({
+          const { id } = req.params;
+
+          let objectId;
+          try {
+            // ✅ Wrap the ObjectId creation in a try/catch block
+            objectId = new ObjectId(id);
+          } catch (err) {
+            // If the ID string is invalid for MongoDB, return 404 (Not Found)
+            return res.status(404).send({
+              success: false,
+              message: 'Request not found',
+            });
+          }
+
+          const request = await donationRequestsCollection.findOne({
+            _id: objectId,
+          });
+
+          if (!request) {
+            return res.status(404).send({
+              success: false,
+              message: 'Request not found',
+            });
+          }
+
+          res.status(200).send(request);
+        } catch (error) {
+          console.error('Error fetching request:', error);
+          res.status(500).send({
             success: false,
-            message: 'Request not found',
+            message: error.message,
           });
         }
-
-        const request = await donationRequestsCollection.findOne({
-          _id: objectId,
-        });
-
-        if (!request) {
-          return res.status(404).send({
-            success: false,
-            message: 'Request not found',
-          });
-        }
-
-        res.status(200).send(request);
-      } catch (error) {
-        console.error('Error fetching request:', error);
-        res.status(500).send({
-          success: false,
-          message: error.message,
-        });
-      }
-    });
+      },
+    );
 
     // ! GET DONORS BY SEARCH (Public Search Page)
     app.get('/api/donors/search', async (req, res) => {
@@ -1031,7 +1040,7 @@ async function run() {
 
     // ! GET ALL USERS (Admin Only) with Pagination & Filter
 
-    app.get('/api/admin/users', async (req, res) => {
+    app.get('/api/admin/users', verifyToken, verifyAdmin, async (req, res) => {
       try {
         const { status, page = 1, limit = 10 } = req.query;
 
@@ -1077,88 +1086,93 @@ async function run() {
     // const { auth } = require("../path/to/your/auth-config"); // Adjust path as needed
 
     // ! UPDATE USER STATUS / ROLE (Admin Only) - Using Better Auth API
-    app.patch('/api/admin/users/:id', async (req, res) => {
-      try {
-        const { id } = req.params; // authId
-        const { action } = req.body;
+    app.patch(
+      '/api/admin/users/:id',
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        try {
+          const { id } = req.params; // authId
+          const { action } = req.body;
 
-        console.log('🚀 Admin Action Received:', { authId: id, action });
+          console.log('🚀 Admin Action Received:', { authId: id, action });
 
-        if (!action) {
-          return res
-            .status(400)
-            .send({ success: false, message: 'Action is required' });
-        }
+          if (!action) {
+            return res
+              .status(400)
+              .send({ success: false, message: 'Action is required' });
+          }
 
-        // 1. Determine the update based on the action
-        let updateFields = {};
+          // 1. Determine the update based on the action
+          let updateFields = {};
 
-        if (action === 'block') {
-          updateFields = { status: 'blocked' };
-        } else if (action === 'unblock') {
-          updateFields = { status: 'active' };
-        } else if (action === 'makeVolunteer') {
-          updateFields = { role: 'volunteer' };
-        } else if (action === 'makeAdmin') {
-          updateFields = { role: 'admin' };
-        } else {
-          return res
-            .status(400)
-            .send({ success: false, message: 'Invalid action provided' });
-        }
+          if (action === 'block') {
+            updateFields = { status: 'blocked' };
+          } else if (action === 'unblock') {
+            updateFields = { status: 'active' };
+          } else if (action === 'makeVolunteer') {
+            updateFields = { role: 'volunteer' };
+          } else if (action === 'makeAdmin') {
+            updateFields = { role: 'admin' };
+          } else {
+            return res
+              .status(400)
+              .send({ success: false, message: 'Invalid action provided' });
+          }
 
-        // 2. Update the 'users' collection (Your custom app data)
-        const usersUpdateResult = await usersCollection.updateOne(
-          { authId: id },
-          {
-            $set: updateFields,
-            $unset: { action: '' },
-          },
-        );
+          // 2. Update the 'users' collection (Your custom app data)
+          const usersUpdateResult = await usersCollection.updateOne(
+            { authId: id },
+            {
+              $set: updateFields,
+              $unset: { action: '' },
+            },
+          );
 
-        if (usersUpdateResult.matchedCount === 0) {
-          return res.status(404).send({
+          if (usersUpdateResult.matchedCount === 0) {
+            return res.status(404).send({
+              success: false,
+              message: "User not found in 'users' collection",
+            });
+          }
+          console.log("✅ 'users' collection updated.");
+
+          // 3. Update the 'user' collection using Better Auth API (Correct Way!)
+          // 3. Update Better Auth 'user' collection directly by email
+          const appUser = await usersCollection.findOne({ authId: id });
+          if (appUser) {
+            await userCollection.updateOne(
+              { email: appUser.email },
+              { $set: updateFields },
+            );
+            console.log("✅ 'user' (Better Auth) collection updated.");
+          } else {
+            console.warn("⚠️ User not found in Better Auth 'user' collection.");
+          }
+
+          // 4. Send success response
+          const successMessage =
+            action === 'block'
+              ? 'blocked'
+              : action === 'unblock'
+                ? 'unblocked'
+                : action === 'makeVolunteer'
+                  ? 'made a volunteer'
+                  : 'made an admin';
+
+          res.status(200).send({
+            success: true,
+            message: `User ${successMessage} successfully!`,
+          });
+        } catch (error) {
+          console.error('🔥 Admin PATCH Error:', error);
+          res.status(500).send({
             success: false,
-            message: "User not found in 'users' collection",
+            message: error.message,
           });
         }
-        console.log("✅ 'users' collection updated.");
-
-        // 3. Update the 'user' collection using Better Auth API (Correct Way!)
-        // 3. Update Better Auth 'user' collection directly by email
-        const appUser = await usersCollection.findOne({ authId: id });
-        if (appUser) {
-          await userCollection.updateOne(
-            { email: appUser.email },
-            { $set: updateFields },
-          );
-          console.log("✅ 'user' (Better Auth) collection updated.");
-        } else {
-          console.warn("⚠️ User not found in Better Auth 'user' collection.");
-        }
-
-        // 4. Send success response
-        const successMessage =
-          action === 'block'
-            ? 'blocked'
-            : action === 'unblock'
-              ? 'unblocked'
-              : action === 'makeVolunteer'
-                ? 'made a volunteer'
-                : 'made an admin';
-
-        res.status(200).send({
-          success: true,
-          message: `User ${successMessage} successfully!`,
-        });
-      } catch (error) {
-        console.error('🔥 Admin PATCH Error:', error);
-        res.status(500).send({
-          success: false,
-          message: error.message,
-        });
-      }
-    });
+      },
+    );
 
     // ! ==========================================
     // ! 🟢 FUNDING & STRIPE ROUTES
@@ -1248,7 +1262,7 @@ async function run() {
     });
 
     // Send a ping to confirm a successful connection
-    await client.db('admin').command({ ping: 1 });
+    // await client.db("admin").command({ ping: 1 });
     console.log(
       'Pinged your deployment. You successfully connected to MongoDB!',
     );
