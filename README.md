@@ -17,7 +17,7 @@
 
 This is the **Express.js REST API** server for BloodSync. It handles all business logic including user management, donation request operations, funding via Stripe, and dashboard analytics.
 
-> 🔗 **Frontend Repository:** [github.com/shahadat-hossain99/bloodsync-client](https://github.com/shahadat-hossain99/bloodsync-client)
+> 🔗 **Frontend Repository:** [https://github.com/tirthosarkar/bloodsync-client](https://github.com/tirthosarkar/bloodsync-client)
 > 🌐 **Live Site:** [bloodsync-every-drop-counts.vercel.app](https://bloodsync-every-drop-counts.vercel.app/)
 
 ---
