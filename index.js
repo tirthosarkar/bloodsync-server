@@ -170,6 +170,75 @@ async function run() {
         res.status(500).send({ success: false, message: error.message });
       }
     });
+
+    // ! GET MONTHLY STATS (Last 6 months)
+    app.get('/api/donation-requests/monthly-stats', async (req, res) => {
+      try {
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+        sixMonthsAgo.setDate(1);
+        sixMonthsAgo.setHours(0, 0, 0, 0);
+
+        const results = await donationRequestsCollection
+          .aggregate([
+            { $match: { createdAt: { $gte: sixMonthsAgo } } },
+            {
+              $group: {
+                _id: {
+                  year: { $year: '$createdAt' },
+                  month: { $month: '$createdAt' },
+                  status: '$status',
+                },
+                count: { $sum: 1 },
+              },
+            },
+            { $sort: { '_id.year': 1, '_id.month': 1 } },
+          ])
+          .toArray();
+
+        const monthNames = [
+          'Jan',
+          'Feb',
+          'Mar',
+          'Apr',
+          'May',
+          'Jun',
+          'Jul',
+          'Aug',
+          'Sep',
+          'Oct',
+          'Nov',
+          'Dec',
+        ];
+        const monthMap = {};
+
+        results.forEach(({ _id, count }) => {
+          const key = `${_id.year}-${_id.month}`;
+          if (!monthMap[key]) {
+            monthMap[key] = {
+              month: monthNames[_id.month - 1],
+              pending: 0,
+              done: 0,
+              inprogress: 0,
+              canceled: 0,
+              _sort: _id.year * 100 + _id.month,
+            };
+          }
+          const status =
+            _id.status?.toLowerCase() === 'cancelled'
+              ? 'canceled'
+              : _id.status?.toLowerCase();
+          if (monthMap[key][status] !== undefined)
+            monthMap[key][status] += count;
+        });
+
+        const data = Object.values(monthMap).sort((a, b) => a._sort - b._sort);
+        res.status(200).send({ success: true, data });
+      } catch (error) {
+        res.status(500).send({ success: false, message: error.message });
+      }
+    });
+
     // 4. GET STATUS BREAKDOWN  ← Pie Chart data
     //    Client calls: serverFetch("/api/donation-requests/status-breakdown")
     //    Returns:      { success, data: [{ name, value }] }
